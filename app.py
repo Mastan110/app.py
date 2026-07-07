@@ -1,90 +1,131 @@
 import streamlit as st
-import requests
 import pandas as pd
 import numpy as np
+import requests
+import plotly.express as px
 
-st.set_page_config(layout="wide")
-st.title("📊 Smart Money Tracker (Stable)")
+st.set_page_config(page_title="Smart Money Tracker", layout="wide")
 
-@st.cache_data(ttl=60)
-def get_data():
+st.title("📊 Smart Money OI Tracker (LIVE)")
+
+# -------------------------
+# NSE LIVE DATA FUNCTION
+# -------------------------
+def get_nse_data():
     try:
         url = "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY"
-        
+
         headers = {
             "User-Agent": "Mozilla/5.0",
-            "Accept-Language": "en-US,en;q=0.9"
+            "Accept-Language": "en-US,en;q=0.9",
         }
 
         session = requests.Session()
         session.get("https://www.nseindia.com", headers=headers)
 
-        response = session.get(url, headers=headers, timeout=5)
-
-        if response.status_code != 200:
-            raise Exception("API blocked")
-
+        response = session.get(url, headers=headers)
         data = response.json()
 
-        records = data['records']['data']
+        records = data["records"]["data"]
 
         rows = []
-        for i in records:
-            if "CE" in i and "PE" in i:
-                rows.append({
-                    "Strike": i['strikePrice'],
-                    "Call_OI": i['CE']['openInterest'],
-                    "Put_OI": i['PE']['openInterest'],
-                    "Call_Chg": i['CE']['changeinOpenInterest'],
-                    "Put_Chg": i['PE']['changeinOpenInterest']
-                })
 
-        df = pd.DataFrame(rows)
-        nifty = data['records']['underlyingValue']
+        for item in records:
+            strike = item["strikePrice"]
 
-        return df, nifty
+            call_oi = item.get("CE", {}).get("openInterest", 0)
+            put_oi = item.get("PE", {}).get("openInterest", 0)
+
+            rows.append([strike, call_oi, put_oi])
+
+        df = pd.DataFrame(rows, columns=["Strike", "Call_OI", "Put_OI"])
+
+        nifty_price = data["records"]["underlyingValue"]
+
+        return df, nifty_price
 
     except:
-        # fallback dummy data (IMPORTANT)
-        st.warning("⚠️ Live data blocked, showing demo data")
-
-        strikes = list(range(19500, 20000, 50))
-        df = pd.DataFrame({
-            "Strike": strikes,
-            "Call_OI": np.random.randint(10000, 50000, len(strikes)),
-            "Put_OI": np.random.randint(10000, 50000, len(strikes)),
-            "Call_Chg": np.random.randint(-5000, 5000, len(strikes)),
-            "Put_Chg": np.random.randint(-5000, 5000, len(strikes))
-        })
-
-        return df, 19750
+        return None, None
 
 
-df, nifty = get_data()
+# -------------------------
+# LOAD DATA
+# -------------------------
+df, nifty_price = get_nse_data()
 
-st.subheader(f"📍 Nifty: {nifty}")
+# -------------------------
+# FALLBACK DEMO
+# -------------------------
+if df is None:
+    st.warning("⚠️ Live data blocked, showing demo data")
 
-df['OI_Diff'] = df['Put_Chg'] - df['Call_Chg']
+    strikes = list(range(19500, 20050, 50))
 
+    df = pd.DataFrame({
+        "Strike": strikes,
+        "Call_OI": np.random.randint(100, 1000, len(strikes)),
+        "Put_OI": np.random.randint(100, 1000, len(strikes)),
+    })
+
+    nifty_price = 19750
+
+# -------------------------
+# PRICE
+# -------------------------
+st.markdown(f"📍 **Nifty: {nifty_price}**")
+
+# -------------------------
 # TREND
-trend = "SIDEWAYS"
-if df['OI_Diff'].sum() > 0:
+# -------------------------
+total_call = df["Call_OI"].sum()
+total_put = df["Put_OI"].sum()
+
+if total_put > total_call:
     trend = "BULLISH 🟢"
-elif df['OI_Diff'].sum() < 0:
+elif total_call > total_put:
     trend = "BEARISH 🔴"
+else:
+    trend = "SIDEWAYS 🟡"
 
 st.subheader(f"📊 Trend: {trend}")
 
-# ALERT
-if df['OI_Diff'].sum() > 50000:
-    st.success("🚀 Bullish Build-up")
-elif df['OI_Diff'].sum() < -50000:
-    st.error("🔻 Bearish Build-up")
-
+# -------------------------
 # HEATMAP
+# -------------------------
 st.subheader("🔥 OI Heatmap")
 
-def color(val):
-    return "background-color: green" if val > 0 else "background-color: red"
+heatmap_df = df.set_index("Strike")[["Call_OI", "Put_OI"]]
 
-st.dataframe(df.style.applymap(color, subset=["OI_Diff"]))
+fig = px.imshow(
+    heatmap_df,
+    text_auto=True,
+    aspect="auto",
+    color_continuous_scale="RdYlGn"
+)
+
+st.plotly_chart(fig, use_container_width=True)
+
+# -------------------------
+# AUTO SUMMARY
+# -------------------------
+st.subheader("🤖 Auto Trend Summary")
+
+max_call = df.loc[df["Call_OI"].idxmax()]
+max_put = df.loc[df["Put_OI"].idxmax()]
+
+st.write(f"📌 Resistance: {max_call['Strike']}")
+st.write(f"📌 Support: {max_put['Strike']}")
+
+if trend == "BULLISH 🟢":
+    st.success("Market looks bullish based on OI")
+elif trend == "BEARISH 🔴":
+    st.error("Market looks bearish based on OI")
+else:
+    st.warning("Market sideways")
+
+# -------------------------
+# TABLE
+# -------------------------
+st.subheader("📋 Data")
+
+st.dataframe(df, use_container_width=True)
