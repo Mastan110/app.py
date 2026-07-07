@@ -21,7 +21,11 @@ def get_nse_data():
         }
 
         session = requests.Session()
-        session.get("https://www.nseindia.com", headers=headers)
+        headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+    "Accept": "*/*",
+    "Referer": "https://www.nseindia.com/",
+        }
 
         response = session.get(url, headers=headers)
         data = response.json()
